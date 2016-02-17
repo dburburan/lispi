@@ -16,11 +16,11 @@
    #\newline
    'terminating-macro
    (reader-dispatch process-indent)
+   #\~
+   'terminating-macro
+   (reader-dispatch process-tilde)
    #\;
    'terminating-macro
-   (reader-dispatch process-semi-colon)
-   #\/
-   'non-terminating-macro
    (reader-dispatch process-line-comment)
    #\:
    'terminating-macro
@@ -73,21 +73,16 @@
   (process-colon-extras src in true-indent colon-indent #f #f))
 
 (define (process-datum src in ch true-indent colon-indent)
-  (define datum-regex (regexp-try-match #px"^[^][)(}{[:space:]\",'`;:]*" in))
+  (define datum-regex (regexp-try-match #px"^[^][)(}{[:space:]\",'`;:~]*" in))
   (define datum (string-append (make-string 1 ch) (bytes->string/utf-8 (car datum-regex))))
   (process-tail src in true-indent colon-indent (to-syntax src in datum)))
 
 (define (process-open-parens src in ch true-indent colon-indent open-parens close-parens)
   (process-parens-list-and-tail open-parens close-parens src in true-indent colon-indent))
 
-(define (process-semi-colon src in ch)
-  (define-values (line col pos) (port-next-location in))
-  (read-error src in 1 "a closing ; requires an opening :"))
+(define (process-tilde src in ch) (read-error src in 1 "a closing ~ requires an opening :"))
 
-(define (process-line-comment src in ch)
-  (if (equal? (peek-char in) #\/)
-    (make-special-comment (regexp-try-match #px"^[^\n]*" in))
-    (read-syntax/recursive src in ch)))
+(define (process-line-comment src in ch) (make-special-comment (regexp-try-match #px"^[^\n]*" in)))
 
 (define null-indent 999999)
 
@@ -137,7 +132,7 @@
      (process-colon-list src in end-indent #f true-indent colon-indent improper-list)))
    ((peek-eof in) null)
    ((peek-close-parens in) null)
-   ((regexp-try-match #px"^[[:blank:]]*;" in) null)
+   ((regexp-try-match #px"^[[:blank:]]*~" in) null)
    ((regexp-try-match indent-regex (peeking-input-port in))
     =>
     (lambda (indent-match)
@@ -195,6 +190,8 @@
       true-indent
       colon-indent
       improper-list)))
+   ((peek-eof in)
+    (read-error src in 1 (format "expected a `~a' to close `~a'" close-parens open-parens)))
    ((read-close-parens in)
     =>
     (lambda (actual-parens)
