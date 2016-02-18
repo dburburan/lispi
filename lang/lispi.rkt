@@ -19,9 +19,6 @@
    #\~
    'terminating-macro
    (reader-dispatch process-tilde)
-   #\;
-   'terminating-macro
-   (reader-dispatch process-line-comment)
    #\:
    'terminating-macro
    (reader-dispatch process-colon true-indent colon-indent)
@@ -37,6 +34,9 @@
    #\"
    'terminating-macro
    (reader-dispatch process-default true-indent colon-indent)
+   #\#
+   'terminating-macro
+   (reader-dispatch process-default true-indent colon-indent)
    #\'
    'terminating-macro
    (reader-dispatch process-default true-indent colon-indent)
@@ -46,9 +46,9 @@
    #\,
    'terminating-macro
    (reader-dispatch process-default true-indent colon-indent)
-   #\#
+   #\;
    'terminating-macro
-   (reader-dispatch process-default true-indent colon-indent)
+   (reader-dispatch process-line-comment)
    #f
    'non-terminating-macro
    (reader-dispatch process-datum true-indent colon-indent)))
@@ -86,7 +86,7 @@
 
 (define null-indent 999999)
 
-(define indent-regex #px"^[[:blank:]]*\n[[:space:]]*")
+(define indent-regex #px"^(?:[[:space:]]*;[^\n]*)*[[:blank:]]*\n[[:space:]]*")
 
 (define (process-tail src in true-indent colon-indent stx (skip-whitespace #t))
   (cond
@@ -132,7 +132,6 @@
      (process-colon-list src in end-indent #f true-indent colon-indent improper-list)))
    ((peek-eof in) null)
    ((peek-close-parens in) null)
-   ((regexp-try-match #px"^[[:blank:]]*~" in) null)
    ((regexp-try-match indent-regex (peeking-input-port in))
     =>
     (lambda (indent-match)
@@ -143,8 +142,8 @@
        (else
         (regexp-try-match indent-regex in)
         (process-colon-list src in end-indent #f new-indent new-indent improper-list)))))
-   ((regexp-try-match #px"^[[:space:]]*\\.[[:space:]]" (peeking-input-port in))
-    (regexp-try-match #px"^[[:space:]]*\\." in)
+   ((regexp-try-match #px"^[[:space:]]*~" in) null)
+   ((check-improper-list in)
     (process-colon-list src in end-indent initial-stx true-indent colon-indent #t))
    (else
     (add-token-to-list
@@ -212,8 +211,7 @@
     (lambda (indent-match)
       (define new-indent (count-regex-indent indent-match))
       (process-parens-list open-parens close-parens src in #f new-indent new-indent improper-list)))
-   ((regexp-try-match #px"^[[:space:]]*\\.[[:space:]]" (peeking-input-port in))
-    (regexp-try-match #px"^[[:space:]]*\\." in)
+   ((check-improper-list in)
     (process-parens-list open-parens close-parens src in #f true-indent colon-indent #t))
    (else
     (add-token-to-list
@@ -228,6 +226,12 @@
       true-indent
       colon-indent
       improper-list)))))
+
+(define (check-improper-list in)
+  (cond
+   ((regexp-try-match #px"^[[:space:]]*\\.[[:space:]]" (peeking-input-port in))
+    (regexp-try-match #px"^[[:space:]]*\\." in))
+   (else #f)))
 
 (define (add-token-to-list improper-list token lst)
   (cond

@@ -70,20 +70,29 @@ define: make-lispi-readtable:
 
 define: lispi-readtable: true-indent colon-indent
   make-readtable: #f
+    ; New tokens
     #\newline 'terminating-macro     reader-dispatch: process-indent
     #\~       'terminating-macro     reader-dispatch: process-tilde
-    #\;       'terminating-macro     reader-dispatch: process-line-comment
     #\:       'terminating-macro     reader-dispatch: process-colon       true-indent colon-indent
+
+    ; Passing indent through standard parens lists
     #\(       'terminating-macro     reader-dispatch: process-open-parens true-indent colon-indent #\( #\)
     #\[       'terminating-macro     reader-dispatch: process-open-parens true-indent colon-indent #\[ #\]
     #\{       'terminating-macro     reader-dispatch: process-open-parens true-indent colon-indent #\{ #\}
 
+    ; Tail process other standard tokens
     #\"       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
+    #\#       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
+
+    ; todo: quotes and quasiquotes
     #\'       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
     #\`       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
     #\,       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
-    #\#       'terminating-macro     reader-dispatch: process-default     true-indent colon-indent
 
+    ; Prevent comments from consuming newlines
+    #\;       'terminating-macro     reader-dispatch: process-line-comment
+
+    ; End datums at new tokens, and perform tail processing
     #f        'non-terminating-macro reader-dispatch: process-datum       true-indent colon-indent
 
 define: reader-dispatch: proc . args~ case-lambda:~
@@ -109,8 +118,8 @@ define: process-indent: src in ch
   ; This is improper use of the readtable though and it trips us up here - a newline
   ; followed by a close parenthesis or EOF shouldn't consume them, so we just return a comment
   cond:
-    peek-eof         :(in): make-special-comment: #f
-    peek-close-parens:(in): make-special-comment: #f
+    peek-eof         : in~: make-special-comment: #f
+    peek-close-parens: in~: make-special-comment: #f
     else:
       read-syntax/recursive: src in #f lispi-readtable: new-indent new-indent
 
@@ -146,7 +155,7 @@ define: process-line-comment: src in ch
 ; Defaulting to a huge indent makes nested colon lists always end on that same line
 define: null-indent 999999
 
-define: indent-regex #px"^[[:blank:]]*\n[[:space:]]*"
+define: indent-regex #px"^(?:[[:space:]]*;[^\n]*)*[[:blank:]]*\n[[:space:]]*"
 
 ; A "tail" is a token following a token, while we still have access to the previous token (as stx)
 ; Similar concept to neoteric expressions, and used heavily for our colon list syntax
@@ -166,7 +175,8 @@ define: process-colon-extras: src in true-indent colon-indent stx (neoteric? neo
       (check-char in #\[ #f): process-parens-list-and-tail: #\[ #\] src in true-indent colon-indent stx
       (check-char in #\{ #f): process-parens-list-and-tail: #\{ #\} src in true-indent colon-indent stx
       else: #f
-    else: process-colon-list-and-tail: src in true-indent colon-indent stx
+    else:
+      process-colon-list-and-tail: src in true-indent colon-indent stx
 
 define: process-tilde-list-and-tail: src in true-indent colon-indent (initial-stx #f)
   process-tail: src in true-indent colon-indent
@@ -185,9 +195,8 @@ define: process-colon-list: src in end-indent initial-stx true-indent colon-inde
       ; Eg "proc::" means "((proc" while "proc: :" means "(proc ("
       process-tail: src in true-indent colon-indent initial-stx #f
       process-colon-list: src in end-indent #f true-indent colon-indent improper-list
-    :peek-eof         : in                    ~ null
-    :peek-close-parens: in                    ~ null
-    :regexp-try-match : #px"^[[:blank:]]*~" in~ null ; If present, consume "~" on same line, and end list
+    :peek-eof         : in~ null
+    :peek-close-parens: in~ null
     :regexp-try-match :(indent-regex peeking-input-port: in) => lambda:~ :indent-match
       define: new-indent count-regex-indent: indent-match
       cond:
@@ -196,9 +205,8 @@ define: process-colon-list: src in end-indent initial-stx true-indent colon-inde
         :else
           regexp-try-match: indent-regex in ; Consume indent
           process-colon-list: src in end-indent #f new-indent new-indent improper-list ; Continue existing list
-    :regexp-try-match: #px"^[[:space:]]*\\.[[:space:]]" peeking-input-port: in
-      ; Todo: Need to check that the period is in the correct place to denote improper list
-      regexp-try-match: #px"^[[:space:]]*\\." in
+    :regexp-try-match: #px"^[[:space:]]*~" in~ null ; If present, consume "~", and end list
+    :check-improper-list: in
       process-colon-list: src in end-indent initial-stx true-indent colon-indent #t
     :else add-token-to-list:~ improper-list
       read-syntax/recursive: src in #f lispi-readtable: true-indent colon-indent
@@ -229,14 +237,24 @@ define: process-parens-list: open-parens close-parens src in initial-stx true-in
     :regexp-try-match:(indent-regex in) => lambda:~ :indent-match
       define: new-indent count-regex-indent: indent-match
       process-parens-list: open-parens close-parens src in #f new-indent new-indent improper-list
-    :regexp-try-match: #px"^[[:space:]]*\\.[[:space:]]" peeking-input-port: in
-      ; Todo: Need to check that the period is in the correct place to denote improper list
-      regexp-try-match: #px"^[[:space:]]*\\." in
+    :check-improper-list: in
       process-parens-list: open-parens close-parens src in #f true-indent colon-indent #t
     :else add-token-to-list:~ improper-list
       read-syntax/recursive: src in #f lispi-readtable: true-indent colon-indent
       process-parens-list: open-parens close-parens src in #f true-indent colon-indent improper-list
 
+;----------------------------------------------------------------------
+; Utilities
+;----------------------------------------------------------------------
+
+define: check-improper-list: in
+  ; Todo: Need to check that the period is in the correct place to denote improper list
+  cond:
+    regexp-try-match:: #px"^[[:space:]]*\\.[[:space:]]" peeking-input-port: in
+      regexp-try-match: #px"^[[:space:]]*\\." in
+    else: #f
+
+; Cons list but skip comment tokens and handle improper lists
 define: add-token-to-list: improper-list token lst
   cond:
     special-comment?:: token ; Ignore comments
@@ -246,15 +264,11 @@ define: add-token-to-list: improper-list token lst
     else:
       cons: token lst
 
-;----------------------------------------------------------------------
-; Utilities
-;----------------------------------------------------------------------
-
 ; Calculate the amount of indent that the given string represents
 define: count-indent: token
   ; Skip over any lines that only contain whitespace and just count the final-indent
   define: final-indent regexp-match: #px"^(?:[^\n]*\n)*(.*)" token
-  for/sum: : ch:(in-string: cadr: final-indent)
+  for/sum: ch::(in-string: cadr: final-indent)
     match: ch
       #\space: 1
       #\tab  : 8 ; TODO: this isn't right, tabs move to the next multiple of 8, not always add 8
@@ -284,7 +298,7 @@ define: peek-eof: in
 
 ; True if the next char after whitespace is a close parens
 define: peek-close-parens: in
-  regexp-try-match: #px"^[[:space:]]*[])}]" peeking-input-port:(in)
+  regexp-try-match: #px"^[[:space:]]*[])}]" peeking-input-port: in
 
 ; Returns which of )]} is the next token, or false if it's not a close parens at all
 define: read-close-parens: in
