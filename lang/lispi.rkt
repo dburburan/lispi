@@ -70,7 +70,9 @@
    (else (read-syntax/recursive src in #f (lispi-readtable new-indent new-indent)))))
 
 (define (process-colon src in ch true-indent colon-indent)
-  (process-colon-extras src in true-indent colon-indent #f #f))
+  (cond
+   ((check-chars in #px"^~" #f) (process-tilde-list-and-tail src in true-indent colon-indent))
+   (else (process-colon-extras src in true-indent colon-indent #f #f))))
 
 (define (process-datum src in ch true-indent colon-indent)
   (define datum-regex (regexp-try-match #px"^[^][)(}{[:space:]\",'`;:~]*" in))
@@ -90,19 +92,21 @@
 
 (define (process-tail src in true-indent colon-indent stx (skip-whitespace #t))
   (cond
-   ((check-char in #\: skip-whitespace) (process-colon-extras src in true-indent colon-indent stx))
+   ((check-chars in #px"^:~" #f) (process-tilde-list-and-tail src in true-indent colon-indent stx))
+   ((check-chars in #px"^:~" #t #t) stx)
+   ((check-chars in #px"^:" skip-whitespace)
+    (process-colon-extras src in true-indent colon-indent stx))
    (else stx)))
 
 (define (process-colon-extras src in true-indent colon-indent stx (neoteric? neoteric-parens?))
   (cond
-   ((check-char in #\~ #f) (process-tilde-list-and-tail src in true-indent colon-indent stx))
    ((and neoteric?
          (cond
-          ((check-char in #\( #f)
+          ((check-chars in #px"^\\(" #f)
            (process-parens-list-and-tail #\( #\) src in true-indent colon-indent stx))
-          ((check-char in #\[ #f)
+          ((check-chars in #px"^\\[" #f)
            (process-parens-list-and-tail #\[ #\] src in true-indent colon-indent stx))
-          ((check-char in #\{ #f)
+          ((check-chars in #px"^\\{" #f)
            (process-parens-list-and-tail #\{ #\} src in true-indent colon-indent stx))
           (else #f))))
    (else (process-colon-list-and-tail src in true-indent colon-indent stx))))
@@ -245,14 +249,15 @@
 
 (define (count-regex-indent regex-result) (count-indent (bytes->string/utf-8 (car regex-result))))
 
-(define (check-char in ch (skip-whitespace #t))
+(define (check-chars in ch-regex (skip-whitespace #t) (peek-only #f))
   (define blank-regex #px"^[[:blank:]]*")
   (define in-peek (peeking-input-port in))
   (and skip-whitespace (regexp-try-match blank-regex in-peek))
   (cond
-   ((equal? (read-char in-peek) ch)
-    (port-commit-peeked (file-position in-peek) (port-progress-evt in) always-evt in)
-    ch)
+   ((regexp-try-match ch-regex in-peek)
+    (and (not peek-only)
+         (port-commit-peeked (file-position in-peek) (port-progress-evt in) always-evt in))
+    #t)
    (else #f)))
 
 (define (peek-eof in)

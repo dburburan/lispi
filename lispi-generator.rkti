@@ -125,8 +125,12 @@ define: process-indent: src in ch
 
 define: process-colon: src in ch true-indent colon-indent
   ; (printf "Raw Colon: [~s]\n" true-indent colon-indent)
-  ; Raw colons disallow neoteric parens
-  process-colon-extras: src in true-indent colon-indent #f #f
+  cond:
+    check-chars:: in #px"^~" #f
+      process-tilde-list-and-tail: src in true-indent colon-indent
+    else:
+      ; Raw colons disallow neoteric parens
+      process-colon-extras: src in true-indent colon-indent #f #f
 
 define: process-datum: src in ch true-indent colon-indent
   ; Read datum (all characters other than delimiters, plus our two new delimiters : and ~)
@@ -161,19 +165,23 @@ define: indent-regex #px"^(?:[[:space:]]*;[^\n]*)*[[:blank:]]*\n[[:space:]]*"
 ; Similar concept to neoteric expressions, and used heavily for our colon list syntax
 define: process-tail: src in true-indent colon-indent stx (skip-whitespace #t)
   cond:
-    check-char:: in #\: skip-whitespace
+    check-chars:: in #px"^:~" #f
+      process-tilde-list-and-tail: src in true-indent colon-indent stx
+    check-chars:: in #px"^:~" #t #t
+      ; If there wasn't a ":~" attached to us, but there is one after whitespace, we don't
+      ; want to process it as a tail. Instead it'll be processed as a raw colon later
+      stx
+    check-chars:: in #px"^:" skip-whitespace
       process-colon-extras: src in true-indent colon-indent stx
     else: stx
 
 ; A colon can be followed by modifier characters, which we process here
 define: process-colon-extras: src in true-indent colon-indent stx (neoteric? neoteric-parens?)
   cond:
-    check-char:: in #\~ #f
-      process-tilde-list-and-tail: src in true-indent colon-indent stx
     and:: neoteric? cond:~
-      (check-char in #\( #f): process-parens-list-and-tail: #\( #\) src in true-indent colon-indent stx
-      (check-char in #\[ #f): process-parens-list-and-tail: #\[ #\] src in true-indent colon-indent stx
-      (check-char in #\{ #f): process-parens-list-and-tail: #\{ #\} src in true-indent colon-indent stx
+      (check-chars in #px"^\\(" #f): process-parens-list-and-tail: #\( #\) src in true-indent colon-indent stx
+      (check-chars in #px"^\\[" #f): process-parens-list-and-tail: #\[ #\] src in true-indent colon-indent stx
+      (check-chars in #px"^\\{" #f): process-parens-list-and-tail: #\{ #\} src in true-indent colon-indent stx
       else: #f
     else:
       process-colon-list-and-tail: src in true-indent colon-indent stx
@@ -278,16 +286,18 @@ define: count-indent: token
 define: count-regex-indent: regex-result
   count-indent: bytes->string/utf-8: car: regex-result
 
-; True if the next char matches the given char, optionally skipping whitespace
-define: check-char: in ch (skip-whitespace #t)
+; True if the next chars match the given regex, optionally skipping whitespace
+define: check-chars: in ch-regex (skip-whitespace #t) (peek-only #f)
   define: blank-regex #px"^[[:blank:]]*"
   define: in-peek peeking-input-port: in
   and: skip-whitespace
     regexp-try-match: blank-regex in-peek
   cond:
-    equal?:: read-char:(in-peek) ch
-      port-commit-peeked: file-position:in-peek~ port-progress-evt:in~ always-evt in
-      ch
+    regexp-try-match:: ch-regex in-peek
+      ;equal?:: read-char:(in-peek) ch
+      and: not: peek-only
+        port-commit-peeked: file-position:in-peek~ port-progress-evt:in~ always-evt in
+      #t
     else: #f
 
 ; True if there is no next char
