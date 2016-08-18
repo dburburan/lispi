@@ -16,9 +16,9 @@
    #\newline
    'terminating-macro
    (reader-dispatch process-indent)
-   #\~
+   #\|
    'terminating-macro
-   (reader-dispatch process-tilde)
+   (reader-dispatch process-pipe)
    #\:
    'terminating-macro
    (reader-dispatch process-colon true-indent colon-indent)
@@ -71,18 +71,18 @@
 
 (define (process-colon src in ch true-indent colon-indent)
   (cond
-   ((check-chars in #px"^~" #f) (process-tilde-list-and-tail src in true-indent colon-indent))
+   ((check-chars in #px"^\\|" #f) (process-pipe-list-and-tail src in true-indent colon-indent))
    (else (process-colon-extras src in true-indent colon-indent #f #f))))
 
 (define (process-datum src in ch true-indent colon-indent)
-  (define datum-regex (regexp-try-match #px"^[^][)(}{[:space:]\",'`;:~]*" in))
+  (define datum-regex (regexp-try-match #px"^[^][)(}{[:space:]\",'`;:|]*" in))
   (define datum (string-append (make-string 1 ch) (bytes->string/utf-8 (car datum-regex))))
   (process-tail src in true-indent colon-indent (to-syntax src in datum)))
 
 (define (process-open-parens src in ch true-indent colon-indent open-parens close-parens)
   (process-parens-list-and-tail open-parens close-parens src in true-indent colon-indent))
 
-(define (process-tilde src in ch) (read-error src in 1 "a closing ~ requires an opening :"))
+(define (process-pipe src in ch) (read-error src in 1 "a closing | requires an opening :"))
 
 (define (process-line-comment src in ch) (make-special-comment (regexp-try-match #px"^[^\n]*" in)))
 
@@ -92,8 +92,8 @@
 
 (define (process-tail src in true-indent colon-indent stx (skip-whitespace #t))
   (cond
-   ((check-chars in #px"^:~" #f) (process-tilde-list-and-tail src in true-indent colon-indent stx))
-   ((check-chars in #px"^:~" #t #t) stx)
+   ((check-chars in #px"^:\\|" #f) (process-pipe-list-and-tail src in true-indent colon-indent stx))
+   ((check-chars in #px"^:\\|" #t #t) stx)
    ((check-chars in #px"^:" skip-whitespace)
     (process-colon-extras src in true-indent colon-indent stx))
    (else stx)))
@@ -111,7 +111,7 @@
           (else #f))))
    (else (process-colon-list-and-tail src in true-indent colon-indent stx))))
 
-(define (process-tilde-list-and-tail src in true-indent colon-indent (initial-stx #f))
+(define (process-pipe-list-and-tail src in true-indent colon-indent (initial-stx #f))
   (process-tail
    src
    in
@@ -146,7 +146,7 @@
        (else
         (regexp-try-match indent-regex in)
         (process-colon-list src in end-indent #f new-indent new-indent improper-list)))))
-   ((regexp-try-match #px"^[[:space:]]*~" in) null)
+   ((regexp-try-match #px"^[[:space:]]*\\|" in) null)
    ((check-improper-list in)
     (process-colon-list src in end-indent initial-stx true-indent colon-indent #t))
    (else

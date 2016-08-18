@@ -72,7 +72,7 @@ define: lispi-readtable: true-indent colon-indent
   make-readtable: #f
     ; New tokens
     #\newline 'terminating-macro     reader-dispatch: process-indent
-    #\~       'terminating-macro     reader-dispatch: process-tilde
+    #\|       'terminating-macro     reader-dispatch: process-pipe
     #\:       'terminating-macro     reader-dispatch: process-colon       true-indent colon-indent
 
     ; Passing indent through standard parens lists
@@ -95,7 +95,7 @@ define: lispi-readtable: true-indent colon-indent
     ; End datums at new tokens, and perform tail processing
     #f        'non-terminating-macro reader-dispatch: process-datum       true-indent colon-indent
 
-define: reader-dispatch: proc . args~ case-lambda:~
+define: reader-dispatch: proc . args| case-lambda:|
   ch:: in
     syntax->datum: apply: proc #f in ch args
   ch:: in src line col pos
@@ -118,24 +118,24 @@ define: process-indent: src in ch
   ; This is improper use of the readtable though and it trips us up here - a newline
   ; followed by a close parenthesis or EOF shouldn't consume them, so we just return a comment
   cond:
-    peek-eof         : in~: make-special-comment: #f
-    peek-close-parens: in~: make-special-comment: #f
+    peek-eof         : in|: make-special-comment: #f
+    peek-close-parens: in|: make-special-comment: #f
     else:
       read-syntax/recursive: src in #f lispi-readtable: new-indent new-indent
 
 define: process-colon: src in ch true-indent colon-indent
   ; (printf "Raw Colon: [~s]\n" true-indent colon-indent)
   cond:
-    check-chars:: in #px"^~" #f
-      process-tilde-list-and-tail: src in true-indent colon-indent
+    check-chars:: in #px"^\\|" #f
+      process-pipe-list-and-tail: src in true-indent colon-indent
     else:
       ; Raw colons disallow neoteric parens
       process-colon-extras: src in true-indent colon-indent #f #f
 
 define: process-datum: src in ch true-indent colon-indent
-  ; Read datum (all characters other than delimiters, plus our two new delimiters : and ~)
-  define: datum-regex regexp-try-match: #px"^[^][)(}{[:space:]\",'`;:~]*" in
-  define: datum string-append:~
+  ; Read datum (all characters other than delimiters, plus our two new delimiters : and |)
+  define: datum-regex regexp-try-match: #px"^[^][)(}{[:space:]\",'`;:|]*" in
+  define: datum string-append:|
     make-string: 1 ch
     bytes->string/utf-8: car: datum-regex
   ; (printf "datum ~s ~s\n" ch datum)
@@ -146,9 +146,9 @@ define: process-open-parens: src in ch true-indent colon-indent open-parens clos
   ; (printf "Open Parens: [~s]\n" open-parens close-parens)
   process-parens-list-and-tail: open-parens close-parens src in true-indent colon-indent
 
-; Encountering a tilde outside of colon list processing is an error
-define: process-tilde: src in ch
-  read-error: src in 1 "a closing ~ requires an opening :"
+; Encountering a pipe outside of colon list processing is an error
+define: process-pipe: src in ch
+  read-error: src in 1 "a closing | requires an opening :"
 
 ; Don't consume newline as part of the comment
 define: process-line-comment: src in ch
@@ -165,10 +165,10 @@ define: indent-regex #px"^(?:[[:space:]]*;[^\n]*)*[[:blank:]]*\n[[:space:]]*"
 ; Similar concept to neoteric expressions, and used heavily for our colon list syntax
 define: process-tail: src in true-indent colon-indent stx (skip-whitespace #t)
   cond:
-    check-chars:: in #px"^:~" #f
-      process-tilde-list-and-tail: src in true-indent colon-indent stx
-    check-chars:: in #px"^:~" #t #t
-      ; If there wasn't a ":~" attached to us, but there is one after whitespace, we don't
+    check-chars:: in #px"^:\\|" #f
+      process-pipe-list-and-tail: src in true-indent colon-indent stx
+    check-chars:: in #px"^:\\|" #t #t
+      ; If there wasn't a ":|" attached to us, but there is one after whitespace, we don't
       ; want to process it as a tail. Instead it'll be processed as a raw colon later
       stx
     check-chars:: in #px"^:" skip-whitespace
@@ -178,7 +178,7 @@ define: process-tail: src in true-indent colon-indent stx (skip-whitespace #t)
 ; A colon can be followed by modifier characters, which we process here
 define: process-colon-extras: src in true-indent colon-indent stx (neoteric? neoteric-parens?)
   cond:
-    and:: neoteric? cond:~
+    and:: neoteric? cond:|
       (check-chars in #px"^\\(" #f): process-parens-list-and-tail: #\( #\) src in true-indent colon-indent stx
       (check-chars in #px"^\\[" #f): process-parens-list-and-tail: #\[ #\] src in true-indent colon-indent stx
       (check-chars in #px"^\\{" #f): process-parens-list-and-tail: #\{ #\} src in true-indent colon-indent stx
@@ -186,7 +186,7 @@ define: process-colon-extras: src in true-indent colon-indent stx (neoteric? neo
     else:
       process-colon-list-and-tail: src in true-indent colon-indent stx
 
-define: process-tilde-list-and-tail: src in true-indent colon-indent (initial-stx #f)
+define: process-pipe-list-and-tail: src in true-indent colon-indent (initial-stx #f)
   process-tail: src in true-indent colon-indent
     process-colon-list: src in true-indent initial-stx true-indent null-indent #f
 
@@ -195,28 +195,28 @@ define: process-colon-list-and-tail: src in true-indent colon-indent (initial-st
     process-colon-list: src in colon-indent initial-stx true-indent null-indent #f
 
 ; colon-indent is used by nested colon lists
-; true-indent is used by colon-tilde (:~) lists
+; true-indent is used by colon-pipe (:|) lists
 define: process-colon-list: src in end-indent initial-stx true-indent colon-indent improper-list
   cond:
-    :initial-stx add-token-to-list:~ improper-list
+    :initial-stx add-token-to-list:| improper-list
       ; Nested tail tokens aren't allowed to have whitespace in-between
       ; Eg "proc::" means "((proc" while "proc: :" means "(proc ("
       process-tail: src in true-indent colon-indent initial-stx #f
       process-colon-list: src in end-indent #f true-indent colon-indent improper-list
-    :peek-eof         : in~ null
-    :peek-close-parens: in~ null
-    :regexp-try-match :(indent-regex peeking-input-port: in) => lambda:~ :indent-match
+    :peek-eof         : in| null
+    :peek-close-parens: in| null
+    :regexp-try-match :(indent-regex peeking-input-port: in) => lambda:| :indent-match
       define: new-indent count-regex-indent: indent-match
       cond:
-        :<=: new-indent end-indent              ~ null ; Indent level has returned to the starting indent
-        :< : new-indent colon-indent null-indent~ null ; Dedent compared to previous line
+        :<=: new-indent end-indent              | null ; Indent level has returned to the starting indent
+        :< : new-indent colon-indent null-indent| null ; Dedent compared to previous line
         :else
           regexp-try-match: indent-regex in ; Consume indent
           process-colon-list: src in end-indent #f new-indent new-indent improper-list ; Continue existing list
-    :regexp-try-match: #px"^[[:space:]]*~" in~ null ; If present, consume "~", and end list
+    :regexp-try-match: #px"^[[:space:]]*\\|" in| null ; If present, consume "|", and end list
     :check-improper-list: in
       process-colon-list: src in end-indent initial-stx true-indent colon-indent #t
-    :else add-token-to-list:~ improper-list
+    :else add-token-to-list:| improper-list
       read-syntax/recursive: src in #f lispi-readtable: true-indent colon-indent
       process-colon-list: src in end-indent #f true-indent colon-indent improper-list
 
@@ -226,28 +226,28 @@ define: process-parens-list-and-tail: open-parens close-parens src in true-inden
 
 define: process-parens-list: open-parens close-parens src in initial-stx true-indent colon-indent improper-list
   cond:
-    :initial-stx add-token-to-list:~ improper-list
+    :initial-stx add-token-to-list:| improper-list
       ; Neoteric expressions can't have nested token tails so we don't process-tail
       ; Eg writeln:(:+ 1 2) - should print 3, not give an error
       ; The second colon should not be placed before the writeln
       initial-stx
       process-parens-list: open-parens close-parens src in #f true-indent colon-indent improper-list
-    :peek-eof: in~ read-error:~ src in 1
+    :peek-eof: in| read-error:| src in 1
       format: "expected a `~a' to close `~a'"
         close-parens open-parens
-    :read-close-parens:(in) => lambda:~ :actual-parens
+    :read-close-parens:(in) => lambda:| :actual-parens
       define-values: (line col pos) port-next-location: in
       if: equal?: close-parens actual-parens
         null ; End list if parens match
         read-error: src in 1
           format: "expected `~a' to close preceding `~a', found instead `~a'"
             close-parens open-parens actual-parens
-    :regexp-try-match:(indent-regex in) => lambda:~ :indent-match
+    :regexp-try-match:(indent-regex in) => lambda:| :indent-match
       define: new-indent count-regex-indent: indent-match
       process-parens-list: open-parens close-parens src in #f new-indent new-indent improper-list
     :check-improper-list: in
       process-parens-list: open-parens close-parens src in #f true-indent colon-indent #t
-    :else add-token-to-list:~ improper-list
+    :else add-token-to-list:| improper-list
       read-syntax/recursive: src in #f lispi-readtable: true-indent colon-indent
       process-parens-list: open-parens close-parens src in #f true-indent colon-indent improper-list
 
@@ -296,7 +296,7 @@ define: check-chars: in ch-regex (skip-whitespace #t) (peek-only #f)
     regexp-try-match:: ch-regex in-peek
       ;equal?:: read-char:(in-peek) ch
       and: not: peek-only
-        port-commit-peeked: file-position:in-peek~ port-progress-evt:in~ always-evt in
+        port-commit-peeked: file-position:in-peek| port-progress-evt:in| always-evt in
       #t
     else: #f
 
@@ -313,7 +313,7 @@ define: peek-close-parens: in
 ; Returns which of )]} is the next token, or false if it's not a close parens at all
 define: read-close-parens: in
   cond:
-    :regexp-try-match:(#px"^[[:space:]]*([])}])" in) => lambda:~ :regexp-result
+    :regexp-try-match:(#px"^[[:space:]]*([])}])" in) => lambda:| :regexp-result
       string-ref: (bytes->string/utf-8 cadr: regexp-result) 0
     :else #f
 
